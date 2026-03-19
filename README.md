@@ -2,6 +2,8 @@
 
 # cac — Claude Code Cloak
 
+**Privacy Cloak + CLI Proxy for Claude Code**
+
 **[中文](#中文) | [English](#english)**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -18,25 +20,28 @@
 
 > **[Switch to English](#english)**
 
-保护本地设备隐私，安全使用 Claude Code。
+### 为什么需要 cac
 
-### 背景
+Claude Code 在运行过程中会读取并上报设备标识符（硬件 UUID、安装 ID、网络出口 IP 等）。cac 通过 wrapper 机制拦截所有 `claude` 调用，在进程层面同时解决两个问题：
 
-Claude Code 在运行过程中会读取并上报若干设备标识符，包括硬件 UUID、安装 ID、网络出口 IP 等。
+**A. 隐私隔离** — 每个配置对外呈现独立的设备身份，彻底隔离真实设备指纹。
 
-cac 通过 wrapper 机制拦截所有 `claude` 调用，在进程层面隔离设备信息，使每个使用配置对外呈现独立的设备身份。
+**B. CLI 专属代理** — 进程级注入代理，`claude` 流量直连远端代理服务器。无需 Clash / Shadowrocket 等本地代理工具，无需中转，无需起本地服务端。配合静态住宅 IP，获得固定、干净的出口身份。
 
-### 隐私保护
+### 特性一览
 
-| 保护项 | 实现方式 |
-|:---|:---|
-| 硬件 UUID | 拦截 `ioreg` 命令，返回配置独立的 UUID |
-| 安装标识 stable_id | 切换配置时写入独立 ID |
-| 用户标识 userID | 切换配置时写入独立 ID |
-| 网络出口 IP | 所有流量强制走独立代理 |
-| 时区 / 语言 | 根据代理出口地区自动匹配注入 |
+| | 特性 | 说明 |
+|:---|:---|:---|
+| **A** | 硬件 UUID 隔离 | 拦截 `ioreg`，每个配置返回独立 UUID |
+| **A** | stable_id / userID 隔离 | 切换配置时自动写入独立标识 |
+| **A** | 时区 / 语言伪装 | 根据代理出口地区自动匹配 |
+| **A** | 遥测关闭 | 置空 `CLAUDE_CODE_ENABLE_TELEMETRY` |
+| **B** | 进程级代理 | 直接注入 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` |
+| **B** | 免本地服务端 | 无需 Clash / Shadowrocket / TUN，CLI 直连 |
+| **B** | 静态住宅 IP 支持 | 配置固定代理 → 固定出口 IP |
+| **B** | 启动前连通检测 | 代理不可达时拒绝启动，真实 IP 零泄漏 |
 
-所有 `claude` 调用（含 Agent 子进程）均通过 wrapper 拦截。代理不可达时拒绝启动，保护系统真实 IP 不被暴露。
+所有 `claude` 调用（含 Agent 子进程）均通过 wrapper 拦截。
 
 ### 安装
 
@@ -46,7 +51,7 @@ cac 通过 wrapper 机制拦截所有 `claude` 调用，在进程层面隔离设
 curl -fsSL https://raw.githubusercontent.com/nmhjklnm/cac/master/install.sh | bash
 ```
 
-安装脚本会自动完成：将 `cac` 放入 `~/bin`、在 `~/.zshrc` 中添加 PATH、生成 wrapper 和 fake ioreg。
+安装脚本会自动完成：将 `cac` 放入 `~/bin`、在 `~/.zshrc` 中添加 PATH、生成 wrapper 和 ioreg shim。
 
 **手动安装：**
 
@@ -65,7 +70,7 @@ source ~/.zshrc
 ### 使用
 
 ```bash
-# 添加一个使用配置（自动检测代理出口的时区和语言）
+# 添加一个配置（自动检测代理出口的时区和语言）
 cac add us1 1.2.3.4:1080:username:password
 
 # 切换配置（同时刷新所有隐私参数）
@@ -91,6 +96,21 @@ claude
 | `cac stop` | 临时停用保护 |
 | `cac -c` | 恢复保护 |
 
+### 工作原理
+
+```
+                cac wrapper (进程级)
+                ┌─────────────────────────┐
+  claude ──────►│ 注入代理环境变量         │──── 直连远端代理 ────► Anthropic API
+                │ 注入伪装设备标识         │     (静态住宅 IP)
+                │ PATH 前置 ioreg shim    │
+                │ 启动前检测代理连通性      │
+                └─────────────────────────┘
+                    ↑ 无本地服务端
+                    ↑ 无流量中转
+                    ↑ 无 TUN / 系统代理
+```
+
 ### 文件结构
 
 ```
@@ -112,14 +132,14 @@ claude
 
 ### 注意事项
 
-> **本地代理工具（Clash / Shadowrocket 等）**
-> 开启 TUN 模式时，需为代理服务器 IP 添加 DIRECT 规则，保护流量不被二次拦截。
+> **本地代理工具共存**
+> 若同时使用 Clash / Shadowrocket 等 TUN 模式，需为代理服务器 IP 添加 DIRECT 规则，避免流量被二次拦截。
 
 > **第三方 API 配置**
 > wrapper 启动时自动清除 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY`，确保使用官方登录端点。
 
 > **IPv6**
-> 建议在系统层关闭 IPv6，保护真实出口 IPv6 地址不被暴露。
+> 建议在系统层关闭 IPv6，防止真实出口 IPv6 地址被暴露。
 
 ---
 
@@ -129,25 +149,28 @@ claude
 
 > **[切换到中文](#中文)**
 
-Protect your local device privacy while using Claude Code.
+### Why cac
 
-### Background
+Claude Code reads and reports device identifiers at runtime (hardware UUID, installation ID, network egress IP, etc.). cac intercepts all `claude` invocations via a wrapper, solving two problems at the process level:
 
-Claude Code reads and reports several device identifiers during runtime, including hardware UUID, installation ID, network egress IP, and more.
+**A. Privacy Cloak** — Each profile presents an independent device identity, fully isolating your real device fingerprint.
 
-cac intercepts all `claude` invocations via a wrapper mechanism, isolating device information at the process level so that each profile presents an independent device identity.
+**B. CLI Proxy** — Process-level proxy injection; `claude` traffic connects directly to the remote proxy server. No Clash / Shadowrocket or any local proxy tools needed. No relay, no local server. Pair with a static residential IP for a fixed, clean egress identity.
 
-### Privacy Protection
+### Features
 
-| Protected Item | Implementation |
-|:---|:---|
-| Hardware UUID | Intercepts `ioreg` command, returns profile-specific UUID |
-| Installation ID (stable_id) | Writes independent ID on profile switch |
-| User ID (userID) | Writes independent ID on profile switch |
-| Network Egress IP | All traffic routed through dedicated proxy |
-| Timezone / Locale | Auto-detected and injected based on proxy exit region |
+| | Feature | Description |
+|:---|:---|:---|
+| **A** | Hardware UUID isolation | Intercepts `ioreg`, returns profile-specific UUID |
+| **A** | stable_id / userID isolation | Writes independent identifiers on profile switch |
+| **A** | Timezone / locale spoofing | Auto-detected from proxy exit region |
+| **A** | Telemetry disabled | Clears `CLAUDE_CODE_ENABLE_TELEMETRY` |
+| **B** | Process-level proxy | Injects `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` directly |
+| **B** | No local server needed | No Clash / Shadowrocket / TUN — direct CLI connection |
+| **B** | Static residential IP support | Fixed proxy config = fixed egress IP |
+| **B** | Pre-launch connectivity check | Blocks startup if proxy unreachable — zero real IP leakage |
 
-All `claude` invocations (including Agent subprocesses) are intercepted by the wrapper. If the proxy is unreachable, startup is blocked to prevent your real IP from being exposed.
+All `claude` invocations (including Agent subprocesses) are intercepted by the wrapper.
 
 ### Installation
 
@@ -157,7 +180,7 @@ All `claude` invocations (including Agent subprocesses) are intercepted by the w
 curl -fsSL https://raw.githubusercontent.com/nmhjklnm/cac/master/install.sh | bash
 ```
 
-The install script automatically: places `cac` in `~/bin`, adds PATH to `~/.zshrc`, and generates the wrapper and fake ioreg.
+The install script automatically: places `cac` in `~/bin`, adds PATH to `~/.zshrc`, and generates the wrapper and ioreg shim.
 
 **Manual install:**
 
@@ -202,6 +225,21 @@ On first use, run `/login` inside Claude Code to authenticate.
 | `cac stop` | Temporarily disable protection |
 | `cac -c` | Re-enable protection |
 
+### How It Works
+
+```
+                cac wrapper (process-level)
+                ┌─────────────────────────┐
+  claude ──────►│ Inject proxy env vars    │──── Direct to remote ────► Anthropic API
+                │ Inject spoofed identity  │     (static residential)
+                │ Prepend ioreg shim       │
+                │ Pre-flight proxy check   │
+                └─────────────────────────┘
+                    ↑ No local server
+                    ↑ No traffic relay
+                    ↑ No TUN / system proxy
+```
+
 ### File Structure
 
 ```
@@ -223,8 +261,8 @@ On first use, run `/login` inside Claude Code to authenticate.
 
 ### Notes
 
-> **Local proxy tools (Clash / Shadowrocket, etc.)**
-> When TUN mode is enabled, add a DIRECT rule for the proxy server IP to prevent traffic from being double-intercepted.
+> **Coexisting with local proxy tools**
+> If you also use Clash / Shadowrocket in TUN mode, add a DIRECT rule for the proxy server IP to prevent traffic from being double-intercepted.
 
 > **Third-party API configuration**
 > The wrapper automatically clears `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_API_KEY` on startup to ensure the official login endpoint is used.
